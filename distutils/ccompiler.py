@@ -1055,7 +1055,7 @@ _default_compilers = (
     # Platform string mappings
     # on a cygwin built python we can use gcc like an ordinary UNIXish
     # compiler
-    ('cygwin.*', 'unix'),
+    ('cygwin.*', 'cygwin'),
     # OS name mappings
     ('posix', 'unix'),
     ('nt', 'msvc'),

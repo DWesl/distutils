@@ -83,69 +83,6 @@ class CygwinCCompiler(UnixCCompiler):
     dylib_lib_format = "cyg%s%s"
     exe_extension = ".exe"
 
-    def __init__(self, verbose=0, dry_run=0, force=0):
-        super().__init__(verbose, dry_run, force)
-
-        status, details = check_config_h()
-        self.debug_print(
-            "Python's GCC status: {} (details: {})".format(status, details)
-        )
-        if status is not CONFIG_H_OK:
-            self.warn(
-                "Python's pyconfig.h doesn't seem to support your compiler. "
-                "Reason: %s. "
-                "Compiling may fail because of undefined preprocessor macros." % details
-            )
-
-        self.cc = os.environ.get('CC', 'gcc')
-        self.cxx = os.environ.get('CXX', 'g++')
-
-        self.linker_dll = self.cc
-        shared_option = "-shared"
-
-        self.set_executables(
-            compiler='%s -mcygwin -O -Wall' % self.cc,
-            compiler_so='%s -mcygwin -mdll -O -Wall' % self.cc,
-            compiler_cxx='%s -mcygwin -O -Wall' % self.cxx,
-            linker_exe='%s -mcygwin' % self.cc,
-            linker_so=('{} -mcygwin {}'.format(self.linker_dll, shared_option)),
-        )
-
-        # Include the appropriate MSVC runtime library if Python was built
-        # with MSVC 7.0 or later.
-        self.dll_libraries = get_msvcr()
-
-    @property
-    def gcc_version(self):
-        # Older numpy depended on this existing to check for ancient
-        # gcc versions. This doesn't make much sense with clang etc so
-        # just hardcode to something recent.
-        # https://github.com/numpy/numpy/pull/20333
-        warnings.warn(
-            "gcc_version attribute of CygwinCCompiler is deprecated. "
-            "Instead of returning actual gcc version a fixed value 11.2.0 is returned.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        with suppress_known_deprecation():
-            return LooseVersion("11.2.0")
-
-    def _compile(self, obj, src, ext, cc_args, extra_postargs, pp_opts):
-        """Compiles the source by spawning GCC and windres if needed."""
-        if ext in ('.rc', '.res'):
-            # gcc needs '.res' and '.rc' compiled to object files !!!
-            try:
-                self.spawn(["windres", "-i", src, "-o", obj])
-            except DistutilsExecError as msg:
-                raise CompileError(msg)
-        else:  # for other files use the C-compiler
-            try:
-                self.spawn(
-                    self.compiler_so + cc_args + [src, '-o', obj] + extra_postargs
-                )
-            except DistutilsExecError as msg:
-                raise CompileError(msg)
-
     def link(
         self,
         target_desc,
@@ -163,61 +100,9 @@ class CygwinCCompiler(UnixCCompiler):
         target_lang=None,
     ):
         """Link the objects."""
-        # use separate copies, so we can modify the lists
-        extra_preargs = copy.copy(extra_preargs or [])
-        libraries = copy.copy(libraries or [])
-        objects = copy.copy(objects or [])
 
         if runtime_library_dirs:
             self.warn(_runtime_library_dirs_msg)
-
-        # Additional libraries
-        libraries.extend(self.dll_libraries)
-
-        # handle export symbols by creating a def-file
-        # with executables this only works with gcc/ld as linker
-        if (export_symbols is not None) and (
-            target_desc != self.EXECUTABLE or self.linker_dll == "gcc"
-        ):
-            # (The linker doesn't do anything if output is up-to-date.
-            # So it would probably better to check if we really need this,
-            # but for this we had to insert some unchanged parts of
-            # UnixCCompiler, and this is not what we want.)
-
-            # we want to put some files in the same directory as the
-            # object files are, build_temp doesn't help much
-            # where are the object files
-            temp_dir = os.path.dirname(objects[0])
-            # name of dll to give the helper files the same base name
-            (dll_name, dll_extension) = os.path.splitext(
-                os.path.basename(output_filename)
-            )
-
-            # generate the filenames for these files
-            def_file = os.path.join(temp_dir, dll_name + ".def")
-
-            # Generate .def file
-            contents = ["LIBRARY %s" % os.path.basename(output_filename), "EXPORTS"]
-            for sym in export_symbols:
-                contents.append(sym)
-            self.execute(write_file, (def_file, contents), "writing %s" % def_file)
-
-            # next add options for def-file
-
-            # for gcc/ld the def-file is specified as any object files
-            objects.append(def_file)
-
-        # end: if ((export_symbols is not None) and
-        #        (target_desc != self.EXECUTABLE or self.linker_dll == "gcc")):
-
-        # who wants symbols and a many times larger output file
-        # should explicitly switch the debug mode on
-        # otherwise we let ld strip the output file
-        # (On my machine: 10KiB < stripped_file < ??100KiB
-        #   unstripped_file = stripped_file + XXX KiB
-        #  ( XXX=254 for a typical python extension))
-        if not debug:
-            extra_preargs.append("-s")
 
         UnixCCompiler.link(
             self,
@@ -242,23 +127,6 @@ class CygwinCCompiler(UnixCCompiler):
         # just warn and hope for the best.
         self.warn(_runtime_library_dirs_msg)
         return []
-
-    # -- Miscellaneous methods -----------------------------------------
-
-    def _make_out_path(self, output_dir, strip_dir, src_name):
-        # use normcase to make sure '.rc' is really '.rc' and not '.RC'
-        norm_src_name = os.path.normcase(src_name)
-        return super()._make_out_path(output_dir, strip_dir, norm_src_name)
-
-    @property
-    def out_extensions(self):
-        """
-        Add support for rc and res files.
-        """
-        return {
-            **super().out_extensions,
-            **{ext: ext + self.obj_extension for ext in ('.res', '.rc')},
-        }
 
 
 # the same as cygwin plus some additional parameters
