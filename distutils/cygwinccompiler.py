@@ -222,3 +222,5 @@ get_versions = None
 A stand-in for the previous get_versions() function to prevent failures
 when monkeypatched. See pypa/setuptools#2969.
 """
+
+CygwinCCompiler.executables["preprocessor"] = ["/usr/bin/cpp"]
